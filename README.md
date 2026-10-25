@@ -19,9 +19,9 @@
 
 ## ✨ Características Principales
 * **Métricas Claras:** Implementación y explicación matemática y práctica del **Error Absoluto Medio (MAE)**.
-* **Validación Cruzada vs. Validación Simple:** Demostración del error crítico de validar "dentro de la muestra" (*in-sample*) y cómo solucionarlo con división de entrenamiento/prueba (*train-test split*).
-* **Búsqueda del Punto Óptimo:** Control de la complejidad del modelo ajustando el parámetro `max_leaf_nodes` para evitar el ruido y capturar patrones reales.
-* **Visualización de Datos:** Gráficos dinámicos con `seaborn` y `matplotlib` para mapear el MAE frente a la cantidad de nodos.
+* **Validación con datos reservados:** Comparación del error "dentro de la muestra" (*in-sample*) con el obtenido en una partición de validación que no se usa para entrenar. Se utiliza una sola partición, no validación cruzada.
+* **Comparación de ocho configuraciones:** Control de la complejidad del modelo ajustando `max_leaf_nodes` y selección del menor MAE de validación entre los candidatos probados.
+* **Visualización de Datos:** Gráfica con `seaborn` y `matplotlib` del MAE de validación frente al máximo de nodos hoja.
 
 ---
 
@@ -58,9 +58,8 @@ graph TD
     H --> I["Calcular Error Absoluto Medio (MAE)"]
     F --> I
     I --> J["Evaluar max_leaf_nodes (Tuning)"]
-    J --> K{"¿MAE Óptimo? (500 nodos)"}
-    K -->|Sí| L["Modelo Final Listo"]
-    K -->|No| G
+    J --> K["Elegir el menor MAE entre los ocho candidatos: 700 hojas"]
+    K --> L["Configuración seleccionada para esta partición de validación"]
 ```
 
 ---
@@ -104,8 +103,8 @@ Esta sección aborda la pregunta fundamental: **¿Qué tan preciso es nuestro mo
 * **Métrica MAE:** Se introduce el Error Absoluto Medio, definido formalmente como:
   $$\text{MAE} = \frac{1}{n} \sum_{i=1}^{n} |y_i - \hat{y}_i|$$
   *En términos sencillos: "En promedio, nuestras predicciones están equivocadas por X cantidad de dólares".*
-* **La trampa del error "In-Sample":** Se demuestra que si evaluamos el modelo con los mismos datos con los que entrenó, el error será artificialmente bajo (~$500), pero fallará estrepitosamente con datos reales.
-* **Solución:** Se implementa `train_test_split` de Scikit-Learn para reservar un **25%** de los datos exclusivamente para validación, asegurando una evaluación honesta y realista.
+* **La trampa del error "In-Sample":** El árbol ajustado y evaluado sobre las 6,196 filas completas obtiene un MAE de **434.715946**. Tras dividir los datos, el árbol ajustado sobre las 4,647 filas de entrenamiento obtiene **281.471917** en entrenamiento y **265,345.351194** en las 1,549 filas de validación. Un error de entrenamiento muy bajo no garantiza generalización.
+* **Solución:** Se implementa `train_test_split(X, y, random_state=0)` para reservar un **25%** de los datos para validación y entrenar con el **75%** restante. Los estimadores también utilizan `random_state=0`.
 
 ### Lección 2: Underfitting y Overfitting
 En esta lección exploramos cómo controlar la complejidad del árbol de decisión para encontrar el equilibrio perfecto.
@@ -127,19 +126,29 @@ Al realizar el análisis de validación y optimización de hiperparámetros sobr
 * `Lattitude` (Latitud)
 * `Longtitude` (Longitud)
 
-Se obtuvieron los siguientes valores de **MAE**:
+Se conservaron **6,196 de 13,580 filas** después de aplicar `dropna(axis=0)`. La partición reproducible contiene **4,647 filas de entrenamiento** y **1,549 de validación**. Cada `DecisionTreeRegressor(max_leaf_nodes=..., random_state=0)` se ajusta solo con entrenamiento y se compara con los precios de validación.
 
-| Nodos Permitidos (`max_leaf_nodes`) | MAE (Dólares) | Estado del Modelo |
-|:-----------------------------------:|:-------------:|:-----------------:|
-| 5                                   | $347,380      | 🔴 Subajuste (Underfitting) |
-| 50                                  | $258,171      | 🟡 Acercándose al óptimo |
-| **500**                             | **$243,495**  | 🟢 **Punto Óptimo (Best Fit)** |
-| 600                                 | $243,908      | 🟡 Inicio de Sobreajuste |
-| 800                                 | $244,929      | 🟡 Sobreajuste leve |
-| 5000                                | $254,432      | 🔴 Sobreajuste (Overfitting) |
+Se obtuvieron los siguientes valores de **MAE de validación**, expresados en las mismas unidades monetarias de `Price` y redondeados a seis decimales:
+
+| Máximo de nodos hoja (`max_leaf_nodes`) | MAE de validación |
+|--------------------------------------:|------------------:|
+| 5                                     | 347,380.338333 |
+| 50                                    | 258,171.212024 |
+| 500                                   | 243,495.963618 |
+| 600                                   | 243,951.094178 |
+| **700**                               | **242,954.685712** |
+| 800                                   | 244,042.742187 |
+| 1,000                                 | 247,378.753656 |
+| 5,000                                 | 255,575.129116 |
 
 > [!IMPORTANT]
-> **Conclusión:** Permitir un máximo de **500 nodos de hojas** ofrece el rendimiento óptimo, reduciendo el error absoluto medio de predicción al mínimo antes de que el sobreajuste empiece a deteriorar la capacidad de generalización del modelo.
+> **Conclusión:** **700 hojas ofrecen el menor MAE de validación entre los ocho valores probados: 242,954.685712**, frente a 243,495.963618 con 500 hojas. Este resultado corresponde al dataset, la limpieza, las siete características, los parámetros y la partición utilizados; no implica que 700 sea el valor óptimo para cualquier problema ni para cualquier partición.
+
+Con 5 hojas el error elevado es compatible con subajuste. Con 5,000 hojas el MAE de validación aumenta respecto al mejor candidato, lo que es compatible con sobreajuste. La curva no es estrictamente monótona: deben compararse los valores calculados, sin suponer que el deterioro comienza necesariamente después de 500 hojas. `max_leaf_nodes` limita las hojas, no directamente la profundidad ni el número total de nodos.
+
+La misma partición de validación se utiliza para seleccionar el hiperparámetro; su MAE mínimo **no es una evaluación final en un conjunto de prueba independiente**. La gráfica guardada en el segundo notebook muestra únicamente el MAE de validación, con el eje de hojas en escala logarítmica.
+
+**Entorno de esta ejecución:** Python 3.12.14, pandas 3.1.0, NumPy 2.5.4, scikit-learn 1.9.1, Matplotlib 3.11.2 y Seaborn 0.13.2. Los notebooks contienen las salidas ejecutadas y las respuestas correspondientes.
 
 ---
 
@@ -152,7 +161,7 @@ Para abrir y experimentar con los cuadernos en tu computadora local:
    jupyter lab
    ```
 2. En la interfaz web de Jupyter, abre el archivo `1_validacion_modelos.ipynb` y ejecuta las celdas secuencialmente para observar el impacto de la separación de datos de validación.
-3. Posteriormente, abre `2_underfitting_y_overfitting.ipynb` para visualizar de manera gráfica cómo se optimiza el modelo de Machine Learning mediante la curva de entrenamiento y validación.
+3. Posteriormente, abre `2_underfitting_y_overfitting.ipynb` para comparar los ocho candidatos mediante la tabla y la curva del MAE de validación frente al máximo de hojas. Cada notebook puede ejecutarse desde un kernel nuevo, de forma independiente.
 
 ---
 *Desarrollado como recurso de aprendizaje interactivo para fundamentos de Ciencia de Datos y Machine Learning.*
